@@ -12,4 +12,4 @@ Below are the file descriptions:
 
 ## Notes
 - Only the code is included here. 
-- A cleaned and faster version of the full pipeline will be uploaded by October.
+- A cleaned and faster version of the full pipeline will be uploaded in the future.
