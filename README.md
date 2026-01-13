@@ -10,6 +10,4 @@ Below are the file descriptions:
 - `mymodels.py`: Contains model definitions and implementations.
 - `Reconstructor.py`: Implements sensitive attribute reconstruction using SVM.
 
-## Notes
-- Only the code is included here. 
-- A cleaned and faster version of the full pipeline will be uploaded in the future.
+
