@@ -2,7 +2,7 @@ from re import T
 import sys
 import os
 sys.path.insert(1, os.path.join(sys.path[0], '../'))
-workspace = '/data/shith/DRFO/workspace'
+workspace = './workspace'
 from Dataset import *
 from tqdm import tqdm
 import numpy as np
@@ -314,7 +314,7 @@ class Predict_sensitive_attribute():
         model = torch.load(file_path)['model']
         self.model = model
 
-    def load_test(self, know_size,  Dataset,  seed = 2000, k = 48, metrics = ['acc'], batch_size = 8192, sensitive_attr = 'gender',
+    def load_test(self, know_size,  Dataset,  seed = 2004, k = 48, metrics = ['acc'], batch_size = 8192, sensitive_attr = 'gender',
     save_path = None, save_path_acc = None):
         print('loading best models in validation sets and testing...')
         model = self.model
@@ -328,7 +328,7 @@ class Predict_sensitive_attribute():
         predict_sensitive_df['predict_score'] = predict_sensitive_attr
         predict_sensitive_df[sensitive_attr] = np.where((predict_sensitive_attr > threshold), 1, 0)
         predict_sensitive_df.to_csv(save_path)
-        data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(self.data_name,self.data_name))
+        data = pd.read_hdf('./{}.h5'.format(self.data_name))
         true_sensitive_attrs = []
         user_ids = np.array(predict_sensitive_df['user_id']).tolist()
         for user_id in user_ids:

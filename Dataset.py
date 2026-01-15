@@ -8,7 +8,7 @@ import warnings
 import os
 import random
 from tqdm import tqdm
-workspace = '/data/shith/DRFO/workspace'
+workspace = './workspace'
 def generate_intermat(data):
     data = data.reset_index().copy()
     df = data.pivot_table(index='user_id', columns='item_id', values='ratings', fill_value=0)
@@ -38,11 +38,11 @@ def process_data(data_name, know_size,  thre = 3.5, explicit = True, use_thre = 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     if data_name == 'ml-1m':
-        data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/ml-1m-50core/ml-1m.h5')
+        data = pd.read_hdf('./ml-1m.h5')
         genders = data['gender']
         data.drop(columns = ['timestamp', 'age', 'gender', 'occupation', 'time'], inplace = True)
     elif data_name == 'tenrec':
-        data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/tenrec-50core/tenrec.h5')
+        data = pd.read_hdf('./tenrec.h5')
         genders = data['gender']
         data.drop(columns = ['gender'], inplace = True)
 
@@ -118,7 +118,7 @@ class MyDataset_for_demoinference():
         self.data_name = data_name
 
         if data is None:
-            feedback_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(data_name,data_name))
+            feedback_data = pd.read_hdf('./{}.h5'.format(data_name))
             df = feedback_data.pivot_table(index='user_id', columns='item_id', values='ratings', fill_value=0)
             df['user_id'] = df.index
             df.index.name = 'user'
@@ -149,30 +149,6 @@ class Dataset_for_MF():
     def __init__(self,data_name,k,train_data = None, val_data = None, test_data = None, data = None):
         self.data_name = data_name
         warnings.filterwarnings('ignore')
-        if data_name == 'ml-100k':
-            if data is None:
-                data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/ml-100k-50core/ml-100k.h5')
-            datamat = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/ml-100k-50core/ml-100k-intermat.h5')
-            datamat.drop(columns=['age', 'gender', 'occupation', 'zip_code'], inplace  = True)
-            self.train_data = self.add_sensitive_for_true(train_data)
-            self.val_data = self.add_sensitive_for_true(val_data)
-            self.test_data = self.add_sensitive_for_true(test_data)
-            self.data = data
-            self.datamat = datamat
-            bad_features = ['age', 'occupation', 'zip_code','gender', 'ratings']
-            self.sparse_features = [feature for feature in self.data.columns if feature not in bad_features]
-            self.sparse_feat_num = len(self.sparse_features)
-            self.target = ['ratings']
-            self.fixlen_feature_columns = [SparseFeat(feat, np.max(self.data[feat]) + 1, embedding_dim=k) # user / item begin from 1 
-                              for feat in self.sparse_features]
-            self.varlen_feature_columns = []
-            self.train_target = self.train_data[self.target].values
-            self.model_input = self.get_model_input(self.train_data)
-            self.val_model_input = self.get_model_input(self.val_data, mode = 'test')
-            self.test_model_input = self.get_model_input(self.test_data, mode = 'test')
-            self.user_feature_column = [SparseFeat('user_id', np.max(self.data['user_id']) + 1, embedding_dim=1) ]
-            self.user_group_distribution = self.generate_user_group_distribution(self.train_data, np.max(self.data['user_id'] + 1))
-
 
 
     def get_model_input(self, data, mode = 'train'):
@@ -241,7 +217,7 @@ class Dataset_for_MF():
     def add_sensitive_for_true(self,  df, sensitive_attribute = 'gender', sensitive_mat = None):
             # only for test now
         if sensitive_mat is None:
-            sensitive_mat = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(self.data_name, self.data_name))
+            sensitive_mat = pd.read_hdf('./{}.h5'.format(self.data_name))
         df['sensitive_attribute'] = 0
         user_ids = df['user_id'].unique().tolist()
         data1_user_column = torch.tensor(df['user_id'].values).float().to(self.device)
@@ -257,7 +233,7 @@ class Dataset_for_MF():
     def add_sensitive_for_true_validation(self,  df, sensitive_attribute = 'gender', sensitive_mat = None):
             # only for test now
         if sensitive_mat is None:
-            sensitive_mat = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(self.data_name, self.data_name))
+            sensitive_mat = pd.read_hdf('./{}.h5'.format(self.data_name))
         
         df['sensitive_attribute_true'] = 0 # pd.Series()
         user_ids = df['user_id'].unique().tolist()
@@ -276,13 +252,13 @@ class Dataset_for_MF():
 
 
 class Dataset_for_MF_with_reconstructed(Dataset_for_MF):
-    def __init__(self, data_name, k, know_size,  data = None, seed = 2000, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
+    def __init__(self, data_name, k, know_size,  data = None, seed = 2004, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
         test_inter_num = 10, test_propotion = 0.1, noisy_label_path = None, sample = False,  add_tune_sensitive = 'True',
         device = 'cuda:0', label_weight = 1, cgl = False):
         self.device = device
         self.cgl = cgl
 
-        save_path = '/data/shith/dataset/dataset_for_partial_fairness/{}-50core'.format(data_name)
+        save_path = './{}'.format(data_name)
         file_name = 'data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_sample_{}'\
             .format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num),
               str(test_propotion), str(thre), str(use_thre), str(sample) )
@@ -294,13 +270,7 @@ class Dataset_for_MF_with_reconstructed(Dataset_for_MF):
         self.data_name = data_name
         warnings.filterwarnings('ignore')
 
-        # set test_sample_num
-        if explicit == True:
-            train_sample_per_pos = 0
-            test_sample = 0
-        else:
-            train_sample_per_pos = 4
-            test_sample = 100
+
 
         # process data
         begin_time =  time.time()
@@ -309,7 +279,7 @@ class Dataset_for_MF_with_reconstructed(Dataset_for_MF):
         print('process data costs', time.time() - begin_time)
         begin_time = time.time()
 
-        feedback_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(data_name,data_name))
+        feedback_data = pd.read_hdf('./{}.h5'.format(data_name))
         df = feedback_data.pivot_table(index='user_id', columns='item_id', values='ratings', fill_value=0)
         df['user_id'] = df.index
         df.index.name = 'user'
@@ -441,13 +411,13 @@ class Dataset_for_MF_with_reconstructed(Dataset_for_MF):
 
 
 class Dataset_DRFO(Dataset_for_MF_with_reconstructed):
-    def __init__(self, data_name, k, know_size,  data = None, seed = 2000, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
+    def __init__(self, data_name, k, know_size,  data = None, seed = 2004, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
         test_inter_num = 10, test_propotion = 0.1, noisy_label_path = None, sample = False, add_tune_sensitive = 'True',
         device = 'cuda:0', label_weight = 1, cgl = False, ):
         self.device = device
         self.cgl = cgl
 
-        save_path = '/data/shith/dataset/dataset_for_partial_fairness/{}-50core'.format(data_name)
+        save_path = './{}'.format(data_name)
         file_name = 'data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_sample_{}'\
             .format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num),
               str(test_propotion), str(thre), str(use_thre), str(sample) )
@@ -459,13 +429,7 @@ class Dataset_DRFO(Dataset_for_MF_with_reconstructed):
         self.data_name = data_name
         warnings.filterwarnings('ignore')
 
-        # set test_sample_num
-        if explicit == True:
-            train_sample_per_pos = 0
-            test_sample = 0
-        else:
-            train_sample_per_pos = 4
-            test_sample = 100
+
 
         # process data
         begin_time =  time.time()
@@ -474,7 +438,7 @@ class Dataset_DRFO(Dataset_for_MF_with_reconstructed):
         print('process data costs', time.time() - begin_time)
         begin_time = time.time()
 
-        feedback_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(data_name,data_name))
+        feedback_data = pd.read_hdf('./{}.h5'.format(data_name))
         df = feedback_data.pivot_table(index='user_id', columns='item_id', values='ratings', fill_value=0)
         df['user_id'] = df.index
         df.index.name = 'user'
@@ -566,12 +530,12 @@ class Dataset_DRFO(Dataset_for_MF_with_reconstructed):
         }
 
 class Dataset_DRFO_extension(Dataset_for_MF_with_reconstructed):
-    def __init__(self, data_name, k, know_size,  data = None, seed = 2000, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
+    def __init__(self, data_name, k, know_size,  data = None, seed = 2004, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
         test_inter_num = 10, test_propotion = 0.1, noisy_label_path = None, sample = False, add_tune_sensitive = 'True',
         device = 'cuda:0', cgl = False, dro = False, lack_profile_prob = 0.2):
         self.device = device
         self.cgl = cgl
-        save_path = '/data/shith/dataset/dataset_for_partial_fairness/{}-50core'.format(data_name)
+        save_path = './{}'.format(data_name)
         file_name = 'data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_sample_{}'\
             .format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num),
               str(test_propotion), str(thre), str(use_thre),str(sample) )
@@ -583,13 +547,7 @@ class Dataset_DRFO_extension(Dataset_for_MF_with_reconstructed):
         self.data_name = data_name
         warnings.filterwarnings('ignore')
 
-        # set test_sample_num
-        if explicit == True:
-            train_sample_per_pos = 0
-            test_sample = 0
-        else:
-            train_sample_per_pos = 4
-            test_sample = 100
+
 
         # process data
         begin_time =  time.time()
@@ -598,7 +556,7 @@ class Dataset_DRFO_extension(Dataset_for_MF_with_reconstructed):
         print('process data costs', time.time() - begin_time)
         begin_time = time.time()
 
-        feedback_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(data_name,data_name))
+        feedback_data = pd.read_hdf('./{}.h5'.format(data_name))
         df = feedback_data.pivot_table(index='user_id', columns='item_id', values='ratings', fill_value=0)
         df['user_id'] = df.index
         df.index.name = 'user'
@@ -775,12 +733,12 @@ class Dataset_DRFO_extension(Dataset_for_MF_with_reconstructed):
 
 
 class Dataset_for_evaluation(Dataset_for_MF_with_reconstructed):
-    def __init__(self, data_name, k, know_size,  data = None, seed = 2000, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
+    def __init__(self, data_name, k, know_size,  data = None, seed = 2004, add_sensitive = 'noisy', thre = 3.5, explicit = True, use_thre = False,
         test_inter_num = 10, test_propotion = 0.1, noisy_label_path = None, sample = False,
          device = 'cuda:0', cgl = False):
         self.cgl = cgl
         self.device = device
-        save_path = '/data/shith/dataset/dataset_for_partial_fairness/{}-50core'.format(data_name)
+        save_path = './{}'.format(data_name)
 
         file_name = 'data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_sample_{}'\
             .format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num),
@@ -799,7 +757,7 @@ class Dataset_for_evaluation(Dataset_for_MF_with_reconstructed):
         train_data, train_label_data, train_nolabel_data, val_data, test_data, data, train_label_users, train_nolabel_users = process_data(data_name,
             know_size, thre, explicit, use_thre, test_inter_num, test_propotion)
 
-        feedback_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(data_name,data_name))
+        feedback_data = pd.read_hdf('./{}.h5'.format(data_name))
         df = feedback_data.pivot_table(index='user_id', columns='item_id', values='ratings', fill_value=0)
         df['user_id'] = df.index
         df.index.name = 'user'

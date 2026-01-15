@@ -25,12 +25,10 @@ def arg_para():
     parser.add_argument('--data_name',type= str,default='tenrec',help = 'name of the dataset')
     parser.add_argument('--model_name',type= str,default='LR',help = 'name of model(you cannot assign models through this arg)')
     parser.add_argument('--trial_name',type= str,default='20230411-svm-debug',help = 'name of trial')
-    parser.add_argument('--seed',type=int,default=2000,help = 'random seed of the exp')
+    parser.add_argument('--seed',type=int,default=2004,help = 'random seed of the exp')
     parser.add_argument('--know_size',type=float,default= 0.3,help = 'propotion of users which have gender labels')
-    # parser.add_argument('--isexplicit',type = bool,default = True,help = 'if True, use explitcit feedback')
-    # parser.add_argument('--test_inter_num',type = int,default = 5)
     parser.add_argument('--use_classifier_stage',type = bool,default = True)
-    parser.add_argument('--classifier_stage',type = int,default = 115)
+    parser.add_argument('--classifier_stage',type = int,default = 1000)
     parser.add_argument('--cuda', type = str, default='0')
     return parser.parse_args()
 
@@ -65,7 +63,7 @@ mark_0 = 0
 mark_1 = 0
 train_users = []
 sensitive_attributes = []
-data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(data_name, data_name))
+data = pd.read_hdf('./{}.h5'.format(data_name))
 genders = data['gender']
 
 random.seed(args.classifier_stage)
@@ -88,9 +86,9 @@ notest_datamat1 = generate_intermat_1(notest_data)
 print('generate intermat cost', time.time() - begin_time)
 begin_time = time.time()
 if args.data_name == 'tenrec':
-    sensitive_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/tenrec-50core/tenrec.h5')
+    sensitive_data = pd.read_hdf('./tenrec.h5')
 if args.data_name == 'ml-1m':
-    sensitive_data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/ml-1m-50core/ml-1m.h5')
+    sensitive_data = pd.read_hdf('./ml-1m.h5')
 notest_datamat = add_sensitive_attr_noise(notest_datamat, sensitive_data, 'gender')
 train_data = notest_datamat.loc[notest_datamat.index.isin(train_users)]
 val_data = notest_datamat.loc[notest_datamat.index.isin(val_users)]
@@ -160,9 +158,9 @@ gammas['0'] = 1 - accuracy_score(true_sensitive_attrs[index_0].tolist(), val_pre
 gammas['1'] = 1 - accuracy_score(true_sensitive_attrs[index_1].tolist(), val_predict_sensitive_attr[index_1].tolist())
 print(gammas)
 if args.data_name == 'ml-1m':
-    acc_file_path = '/data/shith/DRFO/workspace/ml-1m/gamma_data_ml-1m_knowsize_{}'.format(str(know_size)) +  '.pt'
+    acc_file_path = './workspace/ml-1m/gamma_data_ml-1m_knowsize_{}'.format(str(know_size)) +  '.pt'
 if args.data_name == 'tenrec':
-    acc_file_path = '/data/shith/DRFO/workspace/tenrec/gamma_data_tenrec_knowsize_{}'.format(str(know_size)) +  '.pt'
+    acc_file_path = './workspace/tenrec/gamma_data_tenrec_knowsize_{}'.format(str(know_size)) +  '.pt'
 torch.save(gammas,acc_file_path)
 def count_zeros_ones(row):
     # 排除'item_id'，'gender'和'user_id'列
@@ -174,7 +172,7 @@ def count_zeros_ones(row):
 predict_data = notest_datamat.loc[notest_datamat.index.isin(train_nolabel_users), ]
 print('predict data', predict_data)
 cal_data = notest_datamat1.loc[notest_datamat1.index.isin(train_nolabel_users), ]
-cal_data.to_csv('/data/shith/1204.csv')
+# cal_data.to_csv('/data/shith/1204.csv')
 print('cal_data', cal_data)
 predict_model_input = predict_data.loc[:,Dataset.sparse_features]
 predict_sensitive_attr = svm.predict(predict_model_input)
@@ -210,7 +208,7 @@ for i in range(len(predict_sensitive_attr)):
             predict_sensitive_attr_pseudo.append(0)
 predict_sensitive_df[sensitive_attr + '_cgl'] = predict_sensitive_attr_pseudo
 predict_sensitive_df.to_csv(save_path)
-data = pd.read_hdf('/data/shith/dataset/dataset_for_partial_fairness/{}-50core/{}.h5'.format(args.data_name,args.data_name))
+data = pd.read_hdf('./{}.h5'.format(args.data_name))
 true_sensitive_attrs = []
 user_ids = np.array(predict_sensitive_df['user_id']).tolist()
 for user_id in user_ids:

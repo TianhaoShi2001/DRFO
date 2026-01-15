@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(1, os.path.join(sys.path[0], '../'))
-workspace = '/data/shith/DRFO/workspace'
+workspace = './workspace'
 import numpy as np
 import pandas as pd
 import torch

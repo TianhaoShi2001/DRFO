@@ -16,7 +16,7 @@ from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 from load_models import *
 from experiment_config import experiment_config
-workspace = '/data/shith/DRFO/workspace'
+workspace = './workspace'
 def arg_para():
     parser = argparse.ArgumentParser(description='DRFO')
     parser.add_argument('--k',type=int,default=32,help = 'dim of hidden layer of feature interaction')
@@ -54,7 +54,7 @@ elif args.data_name == 'tenrec':
             'l2_w':tune.grid_search([1e-4]),
             'lr_prop':tune.grid_search([1e-3]), 
         }
-name_seed = 2000
+name_seed = 2004
 def trainable(config):
     seed=args.seed
     random.seed(seed)
@@ -62,7 +62,7 @@ def trainable(config):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed) 
     torch.cuda.manual_seed_all(seed)
-    # seed = 2000
+    # seed = 2004
     k = args.k
     data_name = args.data_name
     know_size = args.know_size# experiment_config['know_size']
@@ -95,9 +95,9 @@ def trainable(config):
 
     if args.train_sensitive == 'noisy':
         if args.data_name == 'ml-1m':
-            acc_file_path = '/data/shith/DRFO/workspace/ml-1m/gamma_data_ml-1m_knowsize_{}'.format(str(know_size)) +  '.pt'
+            acc_file_path = './workspace/ml-1m/gamma_data_ml-1m_knowsize_{}'.format(str(know_size)) +  '.pt'
         if args.data_name == 'tenrec':
-            acc_file_path = '/data/shith/DRFO/workspace/tenrec/gamma_data_tenrec_knowsize_{}'.format(str(know_size)) +  '.pt'
+            acc_file_path = './workspace/tenrec/gamma_data_tenrec_knowsize_{}'.format(str(know_size)) +  '.pt'
         gammas = list(torch.load(acc_file_path).values())
     else:
         gammas = [0,0]
@@ -221,7 +221,7 @@ else:
 result = tune.run(
     trainable,
     resources_per_trial={"cpu": 1, "gpu": args.num_per_gpu},
-    local_dir = '/data/shith/DRFO/ray_results',
+    local_dir = './ray_results',
     name = args.data_name + args.model_name + args.trial_name,
     config=config,
     progress_reporter=reporter,
@@ -235,7 +235,7 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed) 
 torch.cuda.manual_seed_all(seed)
-# seed = 2000
+# seed = 2004
 
 # use for save models
 k = args.k
