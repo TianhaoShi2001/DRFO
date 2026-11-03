@@ -1,0 +1,17 @@
+name: drfo
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pandas
+  - scikit-learn
+  - tqdm
+  - pyyaml
+  - pip:
+      - torch==2.0.1
+      - deepctr-torch==0.2.8
+      - ray==2.0.0

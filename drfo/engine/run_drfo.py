@@ -1,0 +1,346 @@
+import sys
+import os
+
+sys.path.insert(1, os.path.join(sys.path[0], '../'))
+
+from Dataset import *
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn.functional as F
+from sklearn.preprocessing import LabelEncoder
+from deepctr_torch.inputs import SparseFeat, VarLenSparseFeat, get_feature_names
+from deepctr_torch.models import DeepFM
+from mymodels import  DRFO
+import time
+import argparse
+import random
+from ray import tune, train
+from ray.tune import CLIReporter
+from ray.tune.schedulers import ASHAScheduler
+from load_models import *
+from sklearn.model_selection import train_test_split
+from experiment_config import experiment_config
+import json
+workspace = '/data/shith/drfo-release/workspace'
+def arg_para():
+    parser = argparse.ArgumentParser(description='DRFO')
+    parser.add_argument('--k',type=int,default=32,help='embedding dim')
+    parser.add_argument('--data_name',type= str,default='tenrec',help = 'name of the dataset')
+    parser.add_argument('--model_name',type= str,default='MF',help='model name')
+    parser.add_argument('--trial_name',type= str,default='drfo',help = 'name of trial')
+    parser.add_argument('--seed',type=int,default=2000,help='embedding dim')
+    parser.add_argument('--know_size',type=float,default= 0.7,help='known attribute ratio')
+    parser.add_argument('--use_classifier_stage',type = bool,default = True)
+    parser.add_argument('--classifier_stage',type = int,default = 1000)
+    parser.add_argument('--only_unknown',type = bool,default = False)
+    parser.add_argument('--train_sensitive',type = str,default = 'noisy')
+    parser.add_argument('--valid_sensitive',type = str,default = 'fake')
+    parser.add_argument('--cuda',type = str,default = '3,5,6,7')
+    parser.add_argument('--num_per_gpu',type = float,default = 0.15)
+    parser.add_argument('--performance_scale',type = float,default = 0.98)
+    parser.add_argument('--best_performance_value',type = float,default = 0.4147020733958456)
+    parser.add_argument('--is_save_drawlog',type = bool, default = True)
+    parser.add_argument('--resume',type = str,default = 'False')
+    return parser.parse_args()
+
+
+args = arg_para() 
+print(args)
+os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
+name_seed = 2000
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
+
+# config = {
+#         'init_lambdas':tune.grid_search([0.1,0.5,1,5,10]),
+#         'lr_prop':tune.grid_search([1e-2,5e-3,1e-3,5e-2]), 
+#         'l2_w':tune.grid_search([1e-5,1e-4,1e-6,1e-3]),
+#     }
+if args.data_name == 'ml-1m':
+    config = {
+            'init_lambdas':tune.grid_search([10]),
+            'lr_prop':tune.grid_search([1e-3,]), 
+            'l2_w':tune.grid_search([1e-6]),
+        }
+elif args.data_name == 'tenrec':
+        config = {
+            'init_lambdas':tune.grid_search([1]),
+            'lr_prop':tune.grid_search([1e-2]), 
+            'l2_w':tune.grid_search([1e-3]),
+        }
+# config = {
+#         'init_lambdas':tune.grid_search([0.1,0.5,1,5,10]),# ([1,0.1,0.01,0.5,0.1,0.001]),# ,1,0.1,0.01,0.5,0.1,1,10,100,1e-3,1,1e-4,1e-3,1e-4,1,10
+#         # 'lambda_lr':tune.grid_search([0]),# ([1e-3,1e-2,1e-1,1]),# ,1e-3,1e-2,1e-1, 1e-2,1e-1,1,1e-2,1e-4,1e-2,1e-1
+#         # 'gamma':tune.grid_search([0,1e-2,1e-1,0.3,1]),# ([0,1e-2,1e-1]),# 1e-1,3e-1,5e-1, 1e-1,3e-1,5e-1,1,1e-1,1e-2
+#         'lr_prop':tune.grid_search([1e-2,5e-3,1e-3,5e-2]), # 5e-2,1e-2,1e-1# 1e-4,([5e-3,1e-3,1e-4,1e-2,0,1e-1]),# ([1e-3,1e-4]),# ([1e-3,1e-4,1e-2]) # 1e-4,,1e-2,1e-1,11e-5,1e-4,1e-3,1e-2,1e-1
+#         # 'batch_size':tune.grid_search([65536])
+#         # 'lambda_max':tune.grid_search([100]),
+#         # 'lambda_min':tune.grid_search([0,]),
+#         # 'lr':tune.grid_search([1e-3]),#([1e-4,1e-3,1e-2,1e-5]),
+#         # 'opt':tune.grid_search(['adam']),#(['adam','rmsprop']),
+#         'l2_w':tune.grid_search([1e-5,1e-4,1e-6,1e-3]),# ([1e-5,1e-6,1e-4,1e-3]),#([1e-6,1e-5,1e-4,1e-3,1e-2,1e-7]),
+#         # 'epsilon':tune.grid_search([0]),
+#         # 'update_k_times':tune.grid_search([1]),
+#         # 'label_weight':tune.grid_search([1]),
+#         # 'unknow_weight':tune.grid_search([1]),
+#         # 'decay_multiple':tune.grid_search([1]),
+#         # 'decay_multiple2':tune.grid_search([1]),
+#     }
+
+def trainable(config):
+    seed=args.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.cuda.manual_seed_all(seed)
+    # seed = 2000
+    k = args.k
+    data_name = args.data_name
+    know_size = args.know_size# experiment_config['know_size']
+    explicit = experiment_config['isexplicit']
+    test_inter_num = experiment_config['test_inter_num']
+    test_propotion = experiment_config['test_propotion']
+    thre = experiment_config['thre']
+    use_thre = experiment_config['use_thre']
+    classifier_stage = args.classifier_stage
+    use_classifier_stage = args.use_classifier_stage
+    only_unknown = args.only_unknown
+
+    file_name = 'data_{}_model_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_only_unknown_{}.pt'.format(data_name,
+    args.model_name ,str(know_size), str(name_seed), str(explicit), str(test_inter_num), str(test_propotion), str(thre), str(use_thre),str(only_unknown))
+    model_path = os.path.join(workspace, data_name, args.model_name,  file_name)
+    begin_time = time.time()
+    while True:
+        try:
+            base_model_state = torch.load(model_path)
+            break
+        except:
+            pass
+            if time.time() - begin_time > 5:
+                break
+    file_name  = 'noisy_label_data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_use_classifier_stage_{}_classifier_stage_{}.csv'\
+.format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num), str(test_propotion), str(thre), str(use_thre),str(use_classifier_stage),str(classifier_stage) )
+    noisy_label_path = os.path.join(workspace, data_name, file_name)
+    Dataset = MyDataset_for_drfo(data_name, k, know_size, data = None, seed = seed, add_sensitive = args.train_sensitive,
+    thre = thre, use_thre = use_thre, test_propotion = test_propotion, test_inter_num = test_inter_num, explicit = explicit, 
+    noisy_label_path = noisy_label_path, sample = False, only_unknown = only_unknown, add_tune_sensitive = args.valid_sensitive)
+    # get_gammas
+    """
+    file_name_acc = 'noisy_acc_data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_use_classifier_stage_{}_classifier_stage_{}.json'\
+.format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num), str(test_propotion), str(thre), str(use_thre),str(use_classifier_stage),str(classifier_stage))
+    save_path_acc = os.path.join(workspace, data_name, file_name_acc)
+    acc_file = open(save_path_acc,'r')
+    _ = acc_file.readline()
+    gamma_dict = json.load(acc_file)
+    gammas = [config['gamma'], config['gamma']]# list(gamma_dict.values())
+    """
+    if args.train_sensitive == 'noisy':
+        if args.data_name == 'ml-100k':
+            acc_file_path = '/data/shith/drfo-release/workspace/ml-100k/gamma_data_ml-100k_knowsize_{}_seed_{}_isexplicit_True_testinternum_10_testpropotion_0.15_thre_3.5_usethre_True_use_classifier_stage_True_classifier_stage_'.format(str(know_size),str(seed)) + str(classifier_stage)+ '.pt'
+        if args.data_name == 'ml-1m':
+            acc_file_path = '/data/shith/drfo-release/workspace/ml-1m/gamma_data_ml-1m_knowsize_{}_seed_{}_isexplicit_True_testinternum_10_testpropotion_0.15_thre_3.5_usethre_True_use_classifier_stage_True_classifier_stage_'.format(str(know_size),str(seed)) + str(classifier_stage)+ '.pt'
+        if args.data_name == 'tenrec':
+            acc_file_path = '/data/shith/drfo-release/workspace/tenrec/gamma_data_tenrec_knowsize_{}_seed_{}_isexplicit_True_testinternum_10_testpropotion_0.15_thre_3.5_usethre_True_use_classifier_stage_True_classifier_stage_'.format(str(know_size),str(seed)) + str(classifier_stage)+ '.pt'
+        gammas = list(torch.load(acc_file_path).values())
+    else:
+        gammas = [0,0]
+    # gammas = [0,0]
+    # gammas = [config['gamma'], config['gamma']]
+    # generate data
+    # gammas = list(torch.load(acc_file_path).values())
+    fixlen_feature_columns = Dataset.fixlen_feature_columns
+    varlen_feature_columns = Dataset.varlen_feature_columns 
+    model_input = Dataset.model_input
+    val_model_input = Dataset.val_model_input
+    test_model_input = Dataset.test_model_input
+    target = Dataset.target
+    train_target = Dataset.train_target
+    user_feat_column = Dataset.user_feature_column
+    group_distribution_dict = Dataset.user_group_distribution
+    train_label_users = Dataset.train_label_users
+    train_nolabel_users = Dataset.train_nolabel_users
+    linear_feature_columns =  varlen_feature_columns + fixlen_feature_columns
+    dnn_feature_columns =  varlen_feature_columns + fixlen_feature_columns
+    etas = Dataset.etas
+    device = 'cpu'
+    use_cuda = True
+    if use_cuda and torch.cuda.is_available():
+        print('cuda ready...')
+        device = 'cuda:0'
+    if explicit and not use_thre:
+        loss_fn = F.mse_loss
+    else:
+        loss_fn = F.binary_cross_entropy
+        
+    seed=args.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.cuda.manual_seed_all(seed)
+    # seed = 2000
+    model = DRFO(linear_feature_columns,dnn_feature_columns,user_feat_column = user_feat_column,
+          device = device,use_linear = True,l2_reg_embedding=config['l2_w'], 
+    obeserved_group_distributions = group_distribution_dict, sensitive_num = 2,
+      gammas = gammas, init_lambdas = config['init_lambdas'], explicit = explicit, use_thre = use_thre, lambda_lr=0)
+    model.load_state_dict(base_model_state, strict = False)
+    # user_embedding_ids = list(map(id, model.user_embedding_dict_dro.parameters()))
+    other_params = []
+    for name,param in model.named_parameters():
+        if 'user_embedding' not in name and 'lambda' not in name:
+            other_params.append(param)
+
+    opt = torch.optim.Adam([
+        {'params':model.user_embedding_dict_dro.parameters(), 'lr':config['lr_prop']},
+        {'params': other_params, 'lr': 1e-3},
+    ])
+
+    model.optim1 = torch.optim.Adam([{'params':model.user_embedding_dict_dro.parameters(), 'lr':config['lr_prop']},])
+    model.optim2 = torch.optim.Adam([
+            {'params': other_params, 'lr': 1e-3},
+        ])
+
+    # _get_optim(model,config['opt'],1e-3)
+    ref_metric = 'val_dp'
+    best_performance_value = args.best_performance_value
+    performance_metric = 'rmse'
+    model.compile(opt, loss_fn, metrics=['rmse','dp', 'dp_true'],
+   performance_metric = performance_metric, best_performance_value = best_performance_value,
+     explicit = (explicit and not use_thre), thre = thre)
+    model_config = {}
+    for key,value in config.items():
+        model_config[key] = config[key]
+    model.get_model_info(args.data_name, args.model_name, model_config, args.trial_name)
+    epoch_logs = model.fit_drfo(model_input, train_target, batch_size = train_target.shape[0], epochs=500, verbose=2, ref_metric=ref_metric
+    ,validation_data=(val_model_input,[]), reg_kind = 1, tune_mode = 'min', performance_mode = 'min', performance_scale = args.performance_scale,
+    watch_performance_metrics = ['val_dp'],  lambda_max = 100, 
+    lambda_min = 0, epsilon = 0, update_k_times = 1, 
+    label_weight = 1,train_label_users = train_label_users, train_nolabel_users = train_nolabel_users,
+    etas = etas, unknow_weight = 1) 
+    # unknow_weight = config['unknow_weight'], epoch_multiplier = (1 / config['decay_multiple']) ** (1 / 100),
+    # epoch_multiplier2 =(1 / config['decay_multiple2']) ** (1 / 100))
+    # test_data = [test_model_input,[]],
+    # 32768
+    
+def _get_optim( model,optimizer,lr):
+        if isinstance(optimizer, str):
+            if optimizer == "sgd":
+                optim = torch.optim.SGD(model.parameters(), lr=lr)
+            elif optimizer == "adam":
+                optim = torch.optim.Adam(model.parameters(), lr = lr)  # 0.001
+            elif optimizer == "adagrad":
+                optim = torch.optim.Adagrad(model.parameters(),lr = lr)  # 0.01
+            elif optimizer == "rmsprop":
+                optim = torch.optim.RMSprop(model.parameters(),lr = lr)
+            else:
+                raise NotImplementedError
+        else:
+            optim = optimizer
+        return optim
+    
+
+
+scheduler = ASHAScheduler(
+        metric="val_auc_top",
+        mode="max",
+        grace_period=20)
+
+reporter = CLIReporter(
+        parameter_columns=["lr", "lambda_lr"],
+        metric_columns=["loss","val_ndcgmyat10"])
+
+#tune.register_trainable(
+    #"IRM-FIS",
+    #lambda config, reporter: run_one_model(config, reporter))
+
+
+class CustomStopper(tune.Stopper):
+        def __init__(self):
+            self.num = 0
+
+
+        def __call__(self, trial_id, result):
+            if(result['val_auc']<=0.52):
+                return True
+            
+            return False
+
+        def stop_all(self):
+            return False
+
+stopper = CustomStopper()
+
+if args.resume == 'False':
+    resume = False
+elif args.resume == 'ERRORED_ONLY':
+    resume = "ERRORED_ONLY" 
+elif args.resume == 'True':
+    resume = True
+result = tune.run(
+    trainable,
+
+    resources_per_trial={"cpu": 1, "gpu": args.num_per_gpu},
+    local_dir = '/data/shith/drfo-release/ray_results',
+    name = args.data_name + args.model_name + args.trial_name,
+    config=config,
+    # scheduler=scheduler,
+    # stop=stopper,
+    progress_reporter=reporter,
+    resume = resume
+    # resume = "ERRORED_ONLY"
+    )
+
+
+seed=args.seed
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed) 
+torch.cuda.manual_seed_all(seed)
+# seed = 2000
+
+k = args.k
+data_name = args.data_name                                 
+know_size = args.know_size# experiment_config['know_size']
+explicit = experiment_config['isexplicit']
+test_inter_num = experiment_config['test_inter_num']
+test_propotion = experiment_config['test_propotion']
+thre = experiment_config['thre']
+use_thre = experiment_config['use_thre']
+only_unknown = args.only_unknown# False# experiment_config['only_unknown']
+classifier_stage = args.classifier_stage
+use_classifier_stage = args.use_classifier_stage
+exp_config = {
+    'seed':args.seed,
+    'data_name':args.data_name,
+    'know_size':args.know_size,
+    'explicit':explicit,
+    'test_inter_num':test_inter_num,
+    'test_propotion':test_propotion,
+    'thre':thre,
+    'use_thre':use_thre,
+    'only_unknown':only_unknown,
+    'classifier_stage':classifier_stage,
+    'use_classifier_stage':use_classifier_stage,
+    'classifier_stage': classifier_stage,
+    'model_name':args.model_name,
+    'performance_scale':args.performance_scale, 
+    'train_mode':args.train_sensitive,
+    'valid_mode':args.valid_sensitive,
+}
+
+file_name  = 'noisy_label_data_{}_knowsize_{}_seed_{}_isexplicit_{}_testinternum_{}_testpropotion_{}_thre_{}_usethre_{}_use_classifier_stage_{}_classifier_stage_{}.csv'\
+.format(data_name, str(know_size), str(seed), str(explicit), str(test_inter_num), str(test_propotion), str(thre), str(use_thre),str(use_classifier_stage),str(classifier_stage) )
+noisy_label_path = os.path.join(workspace, data_name, file_name)
+
+Dataset = MyDataset_for_test(data_name, k, know_size, data = None, seed = seed, add_sensitive = 'True', explicit = explicit,
+ thre = thre, use_thre = use_thre, test_inter_num = test_inter_num, 
+ test_propotion = test_propotion, noisy_label_path = noisy_label_path, only_unknown = only_unknown)
+lt = new_load_models(data_name = args.data_name, model_name = args.model_name, trial_name = args.trial_name, test_mode = 'true', exp_config = exp_config, dro = True)
+lt.load_test(args.model_name + args.trial_name, Dataset = Dataset)
+lt.load_test(args.model_name + args.trial_name, Dataset = Dataset, test_or_val = 'val')
+
+import os
+os._exit(0)
